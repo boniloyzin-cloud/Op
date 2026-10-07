@@ -1,0 +1,219 @@
+-- DAVI: True Physics Impact Missile (Delta Mobile)
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInput = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local missileModel = nil
+local primaryPart = nil
+local isFlying = false
+local SPEED = 160
+
+-- Physics Movers
+local alignOrientation = nil
+local linearVelocity = nil
+local attachment = nil
+
+if getgenv().FTAP_Gui then getgenv().FTAP_Gui:Destroy() end
+
+-- Draggable Screen UI
+local gui = Instance.new("ScreenGui")
+gui.Name = "FTAP_Gui"
+gui.ResetOnSpawn = false
+gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+getgenv().FTAP_Gui = gui
+
+local btn = Instance.new("TextButton")
+btn.Size = UDim2.new(0, 180, 0, 65)
+btn.Position = UDim2.new(0.65, 0, 0.35, 0)
+btn.BackgroundColor3 = Color3.fromRGB(240, 40, 40)
+btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+btn.Font = Enum.Font.SourceSansBold
+btn.Text = "LAUNCH MISSILE"
+btn.TextScaled = true
+btn.Active = true
+btn.Parent = gui
+
+-- Rounded Corners
+Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
+
+-- Button Border Stroke
+local borderStroke = Instance.new("UIStroke", btn)
+borderStroke.Color = Color3.fromRGB(255, 255, 255)
+borderStroke.Thickness = 2.5
+borderStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+-- High-Contrast Text Stroke (Outline)
+local textStroke = Instance.new("UIStroke", btn)
+textStroke.Color = Color3.fromRGB(0, 0, 0)
+textStroke.Thickness = 2.5
+textStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+
+-- Text Padding & Size Constraints for Readability
+local textPadding = Instance.new("UIPadding", btn)
+textPadding.PaddingLeft = UDim.new(0, 8)
+textPadding.PaddingRight = UDim.new(0, 8)
+textPadding.PaddingTop = UDim.new(0, 6)
+textPadding.PaddingBottom = UDim.new(0, 6)
+
+local textSizeConstraint = Instance.new("UITextSizeConstraint", btn)
+textSizeConstraint.MinTextSize = 14
+textSizeConstraint.MaxTextSize = 22
+
+-- Touch-Drag Logic
+local dragging, dragStart, startPos
+btn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = btn.Position
+    end
+end)
+
+UserInput.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+        local delta = input.Position - dragStart
+        btn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+UserInput.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+-- Stop & Detonate
+local function stopMissile()
+    if not isFlying then return end
+    isFlying = false
+    
+    -- Visual explosion effect
+    if primaryPart and primaryPart:IsDescendantOf(workspace) then
+        local exp = Instance.new("Explosion")
+        exp.Position = primaryPart.Position
+        exp.BlastRadius = 20
+        exp.Parent = workspace
+    end
+
+    -- Destroy physics objects
+    if linearVelocity then linearVelocity:Destroy() end
+    if alignOrientation then alignOrientation:Destroy() end
+    if attachment then attachment:Destroy() end
+    
+    if missileModel and missileModel:IsDescendantOf(workspace) then
+        missileModel:Destroy()
+    elseif primaryPart and primaryPart:IsDescendantOf(workspace) then
+        primaryPart:Destroy()
+    end
+    
+    missileModel = nil
+    primaryPart = nil
+    
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        Camera.CameraSubject = LocalPlayer.Character.Humanoid
+    end
+    
+    btn.Text = "LAUNCH MISSILE"
+    btn.BackgroundColor3 = Color3.fromRGB(240, 40, 40)
+end
+
+-- Physics Steering Loop
+RunService.Stepped:Connect(function()
+    if not isFlying or not primaryPart or not primaryPart:IsDescendantOf(workspace) then
+        if isFlying then stopMissile() end
+        return
+    end
+
+    -- Force Network Ownership so server accepts collision physics
+    pcall(function()
+        primaryPart:SetNetworkOwner(LocalPlayer)
+    end)
+
+    -- Update physics movers toward camera orientation
+    local camCF = Camera.CFrame
+    if alignOrientation and linearVelocity then
+        alignOrientation.CFrame = camCF
+        linearVelocity.VectorVelocity = camCF.LookVector * SPEED
+    end
+end)
+
+-- Start Missile Physics
+local function startMissile(part)
+    primaryPart = part
+    
+    -- Set up attachment & real physics movers
+    attachment = Instance.new("Attachment")
+    attachment.Parent = primaryPart
+
+    alignOrientation = Instance.new("AlignOrientation")
+    alignOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
+    alignOrientation.Attachment0 = attachment
+    alignOrientation.MaxTorque = 1000000
+    alignOrientation.Responsiveness = 200
+    alignOrientation.CFrame = Camera.CFrame
+    alignOrientation.Parent = primaryPart
+
+    linearVelocity = Instance.new("LinearVelocity")
+    linearVelocity.MaxForce = 1000000
+    linearVelocity.Attachment0 = attachment
+    linearVelocity.VectorVelocity = Camera.CFrame.LookVector * SPEED
+    linearVelocity.Parent = primaryPart
+
+    isFlying = true
+    Camera.CameraSubject = primaryPart
+    btn.Text = "DETONATE"
+    btn.BackgroundColor3 = Color3.fromRGB(40, 200, 40)
+
+    -- Detect collision via physical touch
+    primaryPart.Touched:Connect(function(hitPart)
+        if isFlying and hitPart and not hitPart:IsDescendantOf(missileModel or primaryPart) and hitPart ~= LocalPlayer.Character then
+            stopMissile()
+        end
+    end)
+end
+
+-- Target Selection & Launch
+btn.Activated:Connect(function()
+    if isFlying then
+        stopMissile()
+    else
+        local ray = Camera:ViewportPointToRay(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        local params = RaycastParams.new()
+        if LocalPlayer.Character then params.FilterDescendantsInstances = {LocalPlayer.Character} end
+        
+        local hit = workspace:Raycast(ray.Origin, ray.Direction * 500, params)
+        if hit and hit.Instance and not hit.Instance.Anchored then
+            local obj = hit.Instance
+            local model = obj:FindFirstAncestorOfClass("Model")
+            
+            missileModel = model
+            local targetPart = (model and model.PrimaryPart) or obj
+            
+            startMissile(targetPart)
+        else
+            btn.Text = "AIM AT AN OBJECT!"
+            task.delay(1.2, function() if not isFlying then btn.Text = "LAUNCH MISSILE" end end)
+        end
+    end
+end)
+
+-- Execution Notifications
+pcall(function()
+    StarterGui:SetCore("SendNotification", {
+        Title = "Script Status",
+        Text = "The script has been executed successfully",
+        Duration = 5
+    })
+    
+    task.wait(0.5) -- Short delay so the notifications don't overlap awkwardly
+    
+    StarterGui:SetCore("SendNotification", {
+        Title = "Creator",
+        Text = "\DAVI_KDMH",
+        Duration = 5
+    })
+end)
